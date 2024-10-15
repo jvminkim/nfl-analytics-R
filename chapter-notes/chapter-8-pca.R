@@ -1,4 +1,4 @@
-list_of_packages_ch8 = c("nflfastR", "tidyverse", "rvest", "htmlTable", "multiUS", "ggthemes")
+list_of_packages_ch8 = c("nflfastR", "tidyverse", "rvest", "htmlTable", "multiUS", "ggthemes", "RColorBrewer")
 lapply(list_of_packages_ch8, library, character.only = TRUE)
 
 combine = tibble()
@@ -33,7 +33,7 @@ combine = combine |>
 summary(combine)
 
 write_csv(combine,"combine.csv")
-
+read_csv("combine.csv")
 
 ggplot(combine, aes(x=Ht, y=Wt)) +
   geom_point() +
@@ -84,3 +84,87 @@ if (!file.exists(combine_knn_file)) {
 } else(
   combine_knn = read_csv(combine_knn_file)
 )
+
+wt_ht = combine |> 
+  dplyr::select(Wt, Ht) |> 
+  dplyr::filter(!is.na(Wt) & !is.na(Ht))
+
+pca_fit_wt_ht = 
+  prcomp(wt_ht)
+
+pca_fit_wt_ht$x |> 
+  as_tibble() |> 
+  ggplot(aes(x = PC1, y = PC2)) +
+  geom_point() +
+  theme_bw()
+
+#scaled input data
+scaled_combine_knn = 
+  scale(combine_knn |> dplyr::select(Ht:Shuttle))
+
+pca_fit = prcomp(scaled_combine_knn)
+
+pca_var = pca_fit$sdev^2
+pca_percent = round(pca_var / sum(pca_var) * 100, 2)
+print(pca_percent)
+
+combine_knn = bind_cols(combine_knn, pca_fit$x)
+
+ggplot(combine_knn, aes(x = PC1, y = PC2, color = PC3)) +
+  geom_point() +
+  theme_bw() +
+  xlab(paste0("PC1 = ", pca_percent[[1]], "%")) +
+  ylab(paste0("PC2 = ", pca_percent[[2]], "%")) +
+  scale_color_continuous(
+    paste0("PC3 = ", pca_percent[3], "%"),
+    low = "skyblue", high = "navyblue"
+  )
+
+color_count = length(unique(combine_knn$Pos)) 
+get_palette = colorRampPalette(brewer.pal(9, "Set1"))
+  
+ggplot(combine_knn, aes(x = PC1, y = PC2, color = Pos)) +
+  geom_point(alpha = 0.75) +
+  theme_bw() +
+  xlab(paste0("PC1 = ", pca_percent[[1]], "%")) +
+  ylab(paste0("PC2 = ", pca_percent[[2]], "%")) +
+  scale_color_manual("Player position",
+                     values = get_palette(color_count))
+
+#Kmeans clustering
+
+set.seed(123)
+k_means_fit = kmeans(combine_knn |> dplyr::select(PC1, PC2),
+                     centers = 6, iter.max = 10)
+
+combine_knn = dplyr::mutate(combine_knn,cluster = k_means_fit$cluster)
+
+combine_knn |> 
+  dplyr::select(Pos, Ht:Shuttle, cluster) |> 
+  head()
+
+combine_knn |> 
+  dplyr::filter(cluster == 1) |> 
+  dplyr::group_by(Pos) |> 
+  dplyr::summarize(n = n(), Ht = mean(Ht), Wt = mean(Wt)) |> 
+  dplyr::arrange(-n) |> 
+  print(n=Inf)
+
+combine_knn_cluster = combine_knn |> 
+  dplyr::group_by(cluster, Pos) |> 
+  dplyr::summarize(n = n(), Ht = mean(Ht), Wt = mean(Wt),
+                   .groups ="drop")
+
+combine_knn_cluster |> 
+  ggplot(aes(x = n, y = Pos)) +
+  geom_col(position = 'dodge') +
+  theme_bw() +
+  facet_wrap(vars(cluster)) +
+  theme(strip.background = element_blank()) +
+  ylab("Position") +
+  xlab("Count")
+
+combine_knn_cluster |> 
+  dplyr::group_by(cluster) |> 
+  dplyr::summarize(ave_ht = mean(Ht),
+                   ave_wt = mean(Wt))
